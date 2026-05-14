@@ -11,7 +11,7 @@ const client = new Client({
 });
  
 const TOKEN = process.env.TOKEN; // 🔑 Set this in Railway Variables
-const FUTURE_BUYER_ROLE = 'Future Buyer'; // Role name exactly as in Discord
+const FUTURE_BUYER_ROLE = '👀・ Future Buyer'; // Role name exactly as in Discord
 const WELCOME_CHANNEL_ID = '1504473543516356658'; // 👋 Welcome channel
  
 // ✅ RULES EMBED
