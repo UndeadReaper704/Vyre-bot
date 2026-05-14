@@ -11,7 +11,7 @@ const client = new Client({
 });
  
 const TOKEN = process.env.TOKEN; // 🔑 Set this in Railway Variables
-const FUTURE_BUYER_ROLE = 'Future Buyer'; // Role name exactly as in Discord
+const FUTURE_BUYER_ROLE = '👀・ Future Buyer'; // Role name exactly as in Discord
 const WELCOME_CHANNEL_ID = '1504473543516356658'; // 👋 Welcome channel
  
 // ✅ RULES EMBED
@@ -58,7 +58,7 @@ function getHowToBuyEmbed() {
 // 👋 AUTO ROLE + WELCOME MESSAGE ON JOIN
 client.on('guildMemberAdd', async (member) => {
   // Give Future Buyer role
-  const role = member.guild.roles.cache.find(👀・ Future Buyer;
+  const role = member.guild.roles.cache.find(r => r.name === FUTURE_BUYER_ROLE);
   if (role) {
     await member.roles.add(role).catch(console.error);
     console.log(`✅ Gave Future Buyer role to ${member.user.tag}`);
