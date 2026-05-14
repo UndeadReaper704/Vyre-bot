@@ -58,7 +58,7 @@ function getHowToBuyEmbed() {
 // 👋 AUTO ROLE + WELCOME MESSAGE ON JOIN
 client.on('guildMemberAdd', async (member) => {
   // Give Future Buyer role
-  const role = member.guild.roles.cache.find(r => r.name === FUTURE_BUYER_ROLE);
+  const role = member.guild.roles.cache.find(👀・ Future Buyer;
   if (role) {
     await member.roles.add(role).catch(console.error);
     console.log(`✅ Gave Future Buyer role to ${member.user.tag}`);
