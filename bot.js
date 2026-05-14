@@ -255,3 +255,369 @@ client.once('ready', () => {
 });
  
 client.login(TOKEN);
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+} = require("discord.js");
+ 
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const CONFIG = {
+  // Change these to match your server
+  STAFF_ROLE_ID: "STAFF_ROLE_ID",         // Role that can see & manage tickets
+  TICKET_CATEGORY_ID: "TICKET_CATEGORY_ID", // Category where ticket channels are created
+  LOG_CHANNEL_ID: "LOG_CHANNEL_ID",       // Channel where transcripts are posted
+  TRANSCRIPT_DM: true,                    // Also DM transcript to ticket opener
+  AUTO_CLOSE_HOURS: null,                 // Set a number (e.g. 48) to enable auto-close, or null to disable
+ 
+  CATEGORIES: {
+    order: {
+      label: "🛒 Order Support",
+      description: "Issues with a purchase or delivery",
+      color: 0x57f287,
+      prefix: "order",
+    },
+    general: {
+      label: "💬 General Support",
+      description: "Any other question or issue",
+      color: 0x5865f2,
+      prefix: "general",
+    },
+    report: {
+      label: "🚨 Report a User",
+      description: "Report a rule-breaking member",
+      color: 0xed4245,
+      prefix: "report",
+    },
+  },
+};
+ 
+// ─── TICKET COUNTER (use a DB or JSON file in production) ─────────────────────
+// Simple in-memory counter; replace with persistent storage (e.g. lowdb, sqlite)
+let ticketCounter = 0;
+// Map of channelId -> { opener, category, claimedBy, openedAt }
+const openTickets = new Map();
+ 
+// ─── SEND PANEL ───────────────────────────────────────────────────────────────
+/**
+ * Call this command handler to post the ticket panel in the current channel.
+ * Usage: /ticketpanel  (wire this up in your slash command handler)
+ */
+async function sendTicketPanel(interaction) {
+  const embed = new EmbedBuilder()
+    .setTitle("🎮 Vyre Support")
+    .setDescription(
+      "Need help? Select a category below to open a ticket.\n\n" +
+        "🛒 **Order Support** — Purchase issues, missing items\n" +
+        "💬 **General Support** — Questions, feedback, other\n" +
+        "🚨 **Report a User** — Report rule violations"
+    )
+    .setColor(0x2b2d31)
+    .setFooter({ text: "Vyre Gaming Shop • One ticket per category" })
+    .setThumbnail(interaction.guild.iconURL({ dynamic: true }));
+ 
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("ticket_open")
+    .setPlaceholder("Choose a category…")
+    .addOptions(
+      Object.entries(CONFIG.CATEGORIES).map(([value, cat]) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(cat.label)
+          .setDescription(cat.description)
+          .setValue(value)
+      )
+    );
+ 
+  const row = new ActionRowBuilder().addComponents(menu);
+ 
+  await interaction.reply({ embeds: [embed], components: [row] });
+}
+ 
+// ─── OPEN TICKET ──────────────────────────────────────────────────────────────
+async function openTicket(interaction) {
+  const categoryKey = interaction.values[0];
+  const cat = CONFIG.CATEGORIES[categoryKey];
+  if (!cat) return;
+ 
+  await interaction.deferReply({ ephemeral: true });
+ 
+  const guild = interaction.guild;
+  const member = interaction.member;
+ 
+  // Prevent duplicate open tickets per category
+  const existing = [...openTickets.entries()].find(
+    ([, t]) => t.opener === member.id && t.category === categoryKey
+  );
+  if (existing) {
+    return interaction.editReply({
+      content: `❌ You already have an open **${cat.label}** ticket: <#${existing[0]}>`,
+    });
+  }
+ 
+  ticketCounter++;
+  const channelName = `${cat.prefix}-${String(ticketCounter).padStart(4, "0")}`;
+ 
+  const channel = await guild.channels.create({
+    name: channelName,
+    type: ChannelType.GuildText,
+    parent: CONFIG.TICKET_CATEGORY_ID,
+    permissionOverwrites: [
+      { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
+      {
+        id: member.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.AttachFiles,
+        ],
+      },
+      {
+        id: CONFIG.STAFF_ROLE_ID,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ManageMessages,
+          PermissionFlagsBits.AttachFiles,
+        ],
+      },
+    ],
+    topic: `${cat.label} | Opened by ${member.user.tag} | Ticket #${ticketCounter}`,
+  });
+ 
+  openTickets.set(channel.id, {
+    opener: member.id,
+    openerTag: member.user.tag,
+    category: categoryKey,
+    categoryLabel: cat.label,
+    claimedBy: null,
+    openedAt: Date.now(),
+    messages: [],
+  });
+ 
+  // Welcome embed inside the ticket
+  const ticketEmbed = new EmbedBuilder()
+    .setTitle(`${cat.label} — Ticket #${ticketCounter}`)
+    .setDescription(
+      `Hey ${member}, welcome to your support ticket!\n\n` +
+        `Please describe your issue in as much detail as possible.\n` +
+        `A staff member will assist you shortly.`
+    )
+    .setColor(cat.color)
+    .addFields(
+      { name: "Opened by", value: `${member}`, inline: true },
+      { name: "Category", value: cat.label, inline: true },
+      { name: "Status", value: "🟢 Open — unclaimed", inline: true }
+    )
+    .setTimestamp()
+    .setFooter({ text: "Vyre Gaming Shop" });
+ 
+  const claimBtn = new ButtonBuilder()
+    .setCustomId(`ticket_claim_${channel.id}`)
+    .setLabel("Claim Ticket")
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji("🙋");
+ 
+  const closeBtn = new ButtonBuilder()
+    .setCustomId(`ticket_close_${channel.id}`)
+    .setLabel("Close Ticket")
+    .setStyle(ButtonStyle.Danger)
+    .setEmoji("🔒");
+ 
+  const row = new ActionRowBuilder().addComponents(claimBtn, closeBtn);
+ 
+  await channel.send({
+    content: `${member} | <@&${CONFIG.STAFF_ROLE_ID}>`,
+    embeds: [ticketEmbed],
+    components: [row],
+  });
+ 
+  await interaction.editReply({
+    content: `✅ Your ticket has been opened: ${channel}`,
+  });
+}
+ 
+// ─── CLAIM TICKET ─────────────────────────────────────────────────────────────
+async function claimTicket(interaction) {
+  const channelId = interaction.customId.replace("ticket_claim_", "");
+  const ticket = openTickets.get(channelId);
+  if (!ticket) return interaction.reply({ content: "Ticket not found.", ephemeral: true });
+ 
+  // Only staff can claim
+  if (!interaction.member.roles.cache.has(CONFIG.STAFF_ROLE_ID)) {
+    return interaction.reply({ content: "❌ Only staff can claim tickets.", ephemeral: true });
+  }
+ 
+  if (ticket.claimedBy) {
+    return interaction.reply({
+      content: `❌ This ticket is already claimed by <@${ticket.claimedBy}>.`,
+      ephemeral: true,
+    });
+  }
+ 
+  ticket.claimedBy = interaction.user.id;
+  ticket.claimedByTag = interaction.user.tag;
+ 
+  const claimEmbed = new EmbedBuilder()
+    .setDescription(`🙋 **${interaction.user.tag}** has claimed this ticket and will assist you.`)
+    .setColor(0xfee75c);
+ 
+  // Update the original embed's status field by editing the first message
+  await interaction.message.edit({
+    embeds: [
+      EmbedBuilder.from(interaction.message.embeds[0]).spliceFields(2, 1, {
+        name: "Status",
+        value: `🟡 Claimed by ${interaction.user}`,
+        inline: true,
+      }),
+    ],
+  });
+ 
+  await interaction.reply({ embeds: [claimEmbed] });
+}
+ 
+// ─── CLOSE TICKET ─────────────────────────────────────────────────────────────
+async function closeTicket(interaction) {
+  const channelId = interaction.customId.replace("ticket_close_", "");
+  const ticket = openTickets.get(channelId);
+  if (!ticket) return interaction.reply({ content: "Ticket not found.", ephemeral: true });
+ 
+  // Only staff or the opener can close
+  const isStaff = interaction.member.roles.cache.has(CONFIG.STAFF_ROLE_ID);
+  const isOpener = interaction.user.id === ticket.opener;
+  if (!isStaff && !isOpener) {
+    return interaction.reply({ content: "❌ You can't close this ticket.", ephemeral: true });
+  }
+ 
+  await interaction.deferReply();
+ 
+  const channel = interaction.channel;
+  const guild = interaction.guild;
+ 
+  // Collect messages for transcript
+  const fetched = await channel.messages.fetch({ limit: 100 });
+  const sorted = [...fetched.values()].reverse();
+ 
+  // Generate HTML transcript
+  const transcript = generateTranscript(ticket, sorted, guild);
+ 
+  // Post to log channel
+  const logChannel = guild.channels.cache.get(CONFIG.LOG_CHANNEL_ID);
+  const logEmbed = new EmbedBuilder()
+    .setTitle(`📋 Ticket Closed — ${channel.name}`)
+    .addFields(
+      { name: "Opened by", value: `<@${ticket.opener}> (${ticket.openerTag})`, inline: true },
+      { name: "Category", value: ticket.categoryLabel, inline: true },
+      {
+        name: "Claimed by",
+        value: ticket.claimedBy ? `<@${ticket.claimedBy}> (${ticket.claimedByTag})` : "Unclaimed",
+        inline: true,
+      },
+      {
+        name: "Closed by",
+        value: `<@${interaction.user.id}> (${interaction.user.tag})`,
+        inline: true,
+      },
+      {
+        name: "Duration",
+        value: formatDuration(Date.now() - ticket.openedAt),
+        inline: true,
+      }
+    )
+    .setColor(0xed4245)
+    .setTimestamp();
+ 
+  const transcriptBuffer = Buffer.from(transcript, "utf-8");
+ 
+  if (logChannel) {
+    await logChannel.send({
+      embeds: [logEmbed],
+      files: [{ attachment: transcriptBuffer, name: `${channel.name}-transcript.html` }],
+    });
+  }
+ 
+  // DM opener the transcript
+  if (CONFIG.TRANSCRIPT_DM) {
+    try {
+      const opener = await guild.members.fetch(ticket.opener);
+      await opener.send({
+        content: `📋 Your ticket **${channel.name}** has been closed. Here's your transcript:`,
+        files: [{ attachment: transcriptBuffer, name: `${channel.name}-transcript.html` }],
+      });
+    } catch {
+      // DMs disabled — silently skip
+    }
+  }
+ 
+  openTickets.delete(channelId);
+ 
+  await interaction.editReply({ content: "🔒 Ticket closed. Deleting in 5 seconds…" });
+  setTimeout(() => channel.delete().catch(() => {}), 5000);
+}
+ 
+// ─── TRANSCRIPT GENERATOR ─────────────────────────────────────────────────────
+function generateTranscript(ticket, messages, guild) {
+  const rows = messages
+    .map((m) => {
+      const time = new Date(m.createdTimestamp).toLocaleString();
+      const attachments = m.attachments.map((a) => `<a href="${a.url}">[attachment]</a>`).join(" ");
+      return `
+      <div class="msg">
+        <img class="avatar" src="${m.author.displayAvatarURL({ size: 32 })}" onerror="this.style.display='none'"/>
+        <div class="body">
+          <span class="author" style="color:${m.member?.displayHexColor || "#fff"}">${escHtml(m.author.tag)}</span>
+          <span class="time">${time}</span>
+          <div class="content">${escHtml(m.content)} ${attachments}</div>
+        </div>
+      </div>`;
+    })
+    .join("");
+ 
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Transcript — ${escHtml(ticket.categoryLabel)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#313338;color:#dbdee1;font-family:'gg sans','Noto Sans',sans-serif;padding:24px}
+  h1{font-size:1.2rem;color:#fff;margin-bottom:4px}
+  .meta{font-size:.8rem;color:#949ba4;margin-bottom:20px}
+  .msg{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid #3f4147}
+  .avatar{width:36px;height:36px;border-radius:50%;flex-shrink:0}
+  .author{font-weight:700;margin-right:8px}
+  .time{font-size:.75rem;color:#949ba4}
+  .content{margin-top:4px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  a{color:#00a8fc}
+</style>
+</head>
+<body>
+<h1>🎮 Vyre — ${escHtml(ticket.categoryLabel)}</h1>
+<p class="meta">
+  Opened by ${escHtml(ticket.openerTag)} &nbsp;|&nbsp;
+  Claimed by ${ticket.claimedByTag ? escHtml(ticket.claimedByTag) : "Unclaimed"} &nbsp;|&nbsp;
+  ${messages.length} messages
+</p>
+${rows}
+</body></html>`;
+}
+ 
+function escHtml(str = "") {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+ 
+function formatDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}m`;
+  if (m > 0) return `${m}m ${s % 60}s`;
+  return `${s}s`;
+}
+ 
+// ─── EXPORTS ──────────────────────────────────────────────────────────────────
+module.exports = { sendTicketPanel, openTicket, claimTicket, closeTicket, CONFIG };
