@@ -11,7 +11,7 @@ const client = new Client({
 });
  
 const TOKEN = process.env.TOKEN; // 🔑 Set this in Railway Variables
-const FUTURE_BUYER_ROLE = '👀・ Future Buyer'; // Role name exactly as in Discord
+const FUTURE_BUYER_ROLE = 'Future Buyer'; // Role name exactly as in Discord
 const WELCOME_CHANNEL_ID = '1504473543516356658'; // 👋 Welcome channel
  
 // ✅ RULES EMBED
@@ -75,9 +75,9 @@ client.on('guildMemberAdd', async (member) => {
     .setColor(0x5865F2)
     .setDescription(`Hey ${member}! Welcome to **Vyre** — the most trusted shop for game exclusives, Roblox items, Bedwars gear and more. 💎`)
     .addFields(
-      { name: '📜 Rules', value: 'Read the rules in <#rules> before doing anything else.' },
-      { name: '🛒 How to Buy', value: 'Check <#how-to-buy> to learn how to make a purchase safely.' },
-      { name: '🎟️ Need Help?', value: 'Open a ticket in <#support> and a staff member will assist you.' },
+      { name: '📜 Rules', value: 'Read the rules in <#1503384039862833366> before doing anything else.' },
+      { name: '🛒 How to Buy', value: 'Check <#1504102270755803238> to learn how to make a purchase safely.' },
+      { name: '🎟️ Need Help?', value: 'Open a ticket in <#1504104874835579000> and a staff member will assist you.' },
       { name: '👀 Your Role', value: 'You have been given the **Future Buyer** role. Make a purchase to upgrade to **Vyre Buyer**!' },
     )
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
